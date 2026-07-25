@@ -1,0 +1,114 @@
+# os_type: windows
+# windows_commands:
+#     os_info: 
+#       command: |
+#         $os = Get-WmiObject -Class Win32_OperatingSystem
+#         $platform = [System.Environment]::OSVersion.Platform
+#         Write-Output "$($os.Caption)|$platform|$($os.Version)|$($os.BuildNumber)"
+
+#     df_lines:
+#       command: Get-Volume | Select-Object DriveLetter, FileSystemLabel, FileSystem, SizeRemaining, Size | ConvertTo-Csv -NoTypeInformation
+
+#     disk_size:
+#       command: "(Get-PhysicalDisk | Select-Object -Property Size | Measure-Object -Property 'Size' -Sum).Sum / 1GB"
+
+#     uptime:
+#       command: |
+#           $bootuptime = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime
+#           $CurrentDate = Get-Date
+#           $uptime = $CurrentDate - $bootuptime
+#           Write-Output "$($uptime.days) Days, $($uptime.Hours) Hours, $($uptime.Minutes) Minutes"
+
+#     cpu:
+#       command: "Get-WmiObject win32_processor | Measure-Object -property LoadPercentage -Average | Select Average"
+
+#     cpu_cores:
+#       command: |
+#         (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum
+
+#     memory:
+#       command: |
+#         $CompObject =  Get-WmiObject -Class WIN32_OperatingSystem
+#         $Memory = ((($CompObject.TotalVisibleMemorySize - $CompObject.FreePhysicalMemory)*100)/ $CompObject.TotalVisibleMemorySize)
+#         Write-Host $Memory
+
+#     memory_size:
+#       command: "(Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property capacity -Sum).sum /1mb"
+   
+#     user_list:
+#       command: "gwmi win32_UserAccount | Select Name | ForEach-Object {$_.Name}"
+
+#     service_list:
+#       command: |
+#         Get-Service | ForEach-Object {
+#           "$($_.DisplayName)|$($_.Status)|$($_.ServiceType)|$($_.StartType)"
+#         }
+
+#     package_list:
+#       command: |
+#         Get-Package | ForEach-Object {
+#           "$($_.Name)|$($_.Version)|$($_.ProviderName)|$($_.Source)"
+#         }
+
+
+windows_combined_command: |
+  Write-Output "===os_info==="
+  $os = Get-WmiObject -Class Win32_OperatingSystem
+  $platform = [System.Environment]::OSVersion.Platform
+  Write-Output "$($os.Caption)|$platform|$($os.Version)|$($os.BuildNumber)"
+
+  Write-Output "===df_lines==="
+  Get-Volume | Select-Object DriveLetter, FileSystemLabel, FileSystem, SizeRemaining, Size | ConvertTo-Csv -NoTypeInformation
+
+  Write-Output "===disk_size==="
+  (Get-PhysicalDisk | Select-Object -Property Size | Measure-Object -Property 'Size' -Sum).Sum / 1GB
+
+  Write-Output "===uptime==="
+  $bootuptime = (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime
+  $CurrentDate = Get-Date
+  $uptime = $CurrentDate - $bootuptime
+  Write-Output "$($uptime.Days) Days, $($uptime.Hours) Hours, $($uptime.Minutes) Minutes"
+
+  Write-Output "===cpu==="
+  Get-WmiObject win32_processor | Measure-Object -property LoadPercentage -Average | Select -ExpandProperty Average
+
+  Write-Output "===cpu_cores==="
+  (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum
+
+  Write-Output "===memory==="
+  $CompObject = Get-WmiObject -Class WIN32_OperatingSystem
+  $Memory = ((($CompObject.TotalVisibleMemorySize - $CompObject.FreePhysicalMemory)*100)/ $CompObject.TotalVisibleMemorySize)
+  Write-Output $Memory
+
+  Write-Output "===memory_size==="
+  (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property capacity -Sum).sum /1mb
+
+  Write-Output "===user_list==="
+  gwmi win32_UserAccount | Select -ExpandProperty Name
+
+  Write-Output "===service_list==="
+  Get-Service | ForEach-Object {
+    "$($_.DisplayName)|$($_.Status)|$($_.ServiceType)|$($_.StartType)"
+  }
+
+  Write-Output "===package_list==="
+
+  $psVer = $PSVersionTable.PSVersion.Major
+
+  if ($psVer -ge 5) {
+    Get-Package | ForEach-Object {
+      "$($_.Name)|$($_.Version)|$($_.ProviderName)|$($_.Source)"
+    }
+  } else {
+    $paths = @(
+      "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+      "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+    foreach ($path in $paths) {
+      Get-ItemProperty $path -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -and $_.DisplayVersion } |
+        ForEach-Object {
+          "$($_.DisplayName)|$($_.DisplayVersion)|Unknown|Registry"
+        }
+    }
+  }

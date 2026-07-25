@@ -1,0 +1,47 @@
+- name: 서버 자원 현황 수집
+  hosts: all
+  gather_facts: false
+  strategy: free
+  ignore_errors: false
+  ignore_unreachable: true
+
+  # 변수 호출
+  vars_files: 
+    - ../vars/main_vars.yml
+  
+  tasks:
+    - block: 
+      - name: OS 이름 수집
+        raw: uname -s
+        register: ansible_os_family
+        when: ansible_port != 5985
+
+      - name: Windows OS 이름 수집
+        win_shell: "(Get-WmiObject Win32_OperatingSystem).Caption"
+        register: windows_os_family
+        when: ansible_port == 5985
+
+      - name: os_family 설정
+        set_fact:
+          os_family: >-
+            {% if ansible_port == 5985 %}
+              Windows
+            {% else %}
+              {{ ansible_os_family.stdout_lines | base_clean | first | trim }}
+            {% endif %}
+
+      - name: os_family 실제 값 확인
+        debug:
+          msg: "{{ cmd_vars_map[os_family | trim] }}"
+
+      - name: OS별 vars 호출
+        include_vars: "{{ cmd_vars_map[os_family | trim] }}"
+        when: cmd_vars_map[os_family | trim] is defined
+
+      - name: OS별 tasks 실행
+        include_tasks: "{{ os_task_map[os_family | trim] }}"
+        when: os_task_map[os_family | trim] is defined
+
+      always:
+      - name: DB 저장 작업 호출
+        include_tasks: ../tasks/updated/save_db.yml

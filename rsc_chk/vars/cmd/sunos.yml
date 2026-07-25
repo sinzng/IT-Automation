@@ -1,0 +1,230 @@
+# os_type: sunos
+# sunos_commands:
+#     os_info: 
+#       command: |
+#         echo "os_name=`uname -s`"
+#         echo "os_version=`head -n 1 /etc/release | awk '{print $1, $2, $3, $4}'`"
+#         echo "kernel=SunOS `uname -r` `uname -v`"
+#         echo "os_type=Unix"
+
+#     df_lines:
+#       command: |
+#         df -k | awk 'NR==1 {print; next}
+#         NF<6 { getline nextline; $0=$0" "nextline }
+#         { print }'
+
+#     disk_size:
+#       command: "df -k | awk '$1 ~ /^\\/dev\\// {s+=$2} END {print int(s/1024/1024)}'"
+
+#     uptime:
+#       command: uptime
+
+#     cpu:
+#       command: "mpstat 1 2 | tail -1 | awk '{print 100 - $NF}'"
+
+#     cpu_cores:
+#       command: "psrinfo | wc -l"
+
+#     memory:
+#       command: "vmstat 1 2 | tail -1 | awk '{print ($5/($4+$5))*100}'"
+
+#     memory_size:
+#       command: "prtconf | grep 'Memory size' | awk '{print $3}'"
+   
+#     user_list:
+#       command: "awk -F: '$7 ~ /(sh|bash|ksh|pfksh)$/ {print $1}' /etc/passwd"
+
+#     service_list:
+#       command: |
+#         if command -v svcs >/dev/null 2>&1; then
+#           svcs -a | awk 'NR > 1 { print $3 }' | while read svc; do
+#             state=`svcs -o state -H "$svc" 2>/dev/null`
+#             enabled=`svcs -l "$svc" 2>/dev/null | awk '/^enabled/ {print $NF}'`
+#             echo "{\"name\": \"$svc\", \"source\": \"smf\", \"state\": \"$state\", \"status\": \"$enabled\"}"
+#           done
+#         else
+#           ls /etc/init.d | while read svc; do
+#             echo "{\"name\": \"$svc\", \"source\": \"initd\", \"state\": \"unknown\"}"
+#           done
+#         fi
+
+#     package_list:
+#       command: |
+#         pkginfo | awk '{ print $2 }' | while read pkg; do 
+#           info=`pkginfo -l $pkg`
+#           version=`echo "$info" | grep 'VERSION' | cut -d':' -f2 | cut -d',' -f1 | sed 's/^ *//'`
+#           release=`echo "$info" | grep 'VERSION' | cut -d',' -f2 | cut -d'=' -f2`
+#           arch=`echo "$info" | grep 'ARCH' | cut -d':' -f2 | sed 's/^ *//'`
+#           echo "{\"name\": \"$pkg\", \"version\": \"$version\", \"release\": \"$release\", \"epoch\": null, \"arch\": \"$arch\", \"source\": \"pkginfo\"}"
+#         done
+# echo "===cpu_cores==="
+  # cpu_cores=""
+
+  # if command -v kstat >/dev/null 2>&1; then
+  #   cpu_cores=`kstat -p cpu_info:::chip_id cpu_info:::core_id 2>/dev/null | nawk -F'[: \t]+' '
+  #     $4 == "chip_id" { chip[$2] = $5 }
+  #     $4 == "core_id" { core[$2] = $5 }
+  #     END {
+  #       for (id in core) {
+  #         chip_id = "0"
+  #         if (id in chip) {
+  #           chip_id = chip[id]
+  #         }
+  #         key = chip_id ":" core[id]
+  #         if (!(key in seen)) {
+  #           seen[key] = 1
+  #           count++
+  #         }
+  #       }
+  #       if (count > 0) {
+  #         print count
+  #       }
+  #     }'`
+  # fi
+
+  # if [ -z "$cpu_cores" ] || [ "$cpu_cores" -le 0 ] 2>/dev/null; then
+  #   if command -v kstat >/dev/null 2>&1; then
+  #     cpu_cores=`kstat -m cpu_info 2>/dev/null | nawk '
+  #       /^module:/ {
+  #         inst = ""
+  #         for (i = 1; i <= NF; i++) {
+  #           if ($i == "instance:") {
+  #             inst = $(i + 1)
+  #           }
+  #         }
+  #       }
+  #       /^[ \t]*chip_id[ \t]/ { chip[inst] = $2 }
+  #       /^[ \t]*core_id[ \t]/ { core[inst] = $2 }
+  #       END {
+  #         for (id in core) {
+  #           chip_id = "0"
+  #           if (id in chip) {
+  #             chip_id = chip[id]
+  #           }
+  #           key = chip_id ":" core[id]
+  #           if (!(key in seen)) {
+  #             seen[key] = 1
+  #             count++
+  #           }
+  #         }
+  #         if (count > 0) {
+  #           print count
+  #         }
+  #       }'`
+  #   fi
+  # fi
+
+  # if [ -z "$cpu_cores" ] || [ "$cpu_cores" -le 0 ] 2>/dev/null; then
+  #   if command -v psrinfo >/dev/null 2>&1 && psrinfo -t >/dev/null 2>&1; then
+  #     cpu_cores=`psrinfo -t 2>/dev/null | nawk '/^[ \t]*core[ \t]+[0-9]+/ {count++} END {if (count > 0) print count}'`
+  #   fi
+  # fi
+
+  # if [ -n "$cpu_cores" ] && [ "$cpu_cores" -gt 0 ] 2>/dev/null; then
+  #   echo "$cpu_cores"
+  # elif command -v psrinfo >/dev/null 2>&1; then
+  #   psrinfo | nawk 'END {print NR}'
+  # else
+  #   echo "0"
+  # fi
+
+# echo "===cpu_cores==="
+# psrinfo -pv | nawk '/physical processor has/ {print $5; exit}'
+# psrinfo -pv | grep "has .* cores" | awk '{sum+=$5} END {print sum}'
+
+sunos_combined_command: |
+  echo "===os_info==="
+  echo "os_name=`uname -s`"
+  echo "os_version=`head -n 1 /etc/release | awk '{print $1, $2, $3, $4}'`"
+  echo "kernel=SunOS `uname -r` `uname -v`"
+  echo "os_type=Unix"
+
+  echo "===df_lines==="
+  df -k | awk 'NR==1 {print; next}
+  NF<6 { getline nextline; $0=$0" "nextline }
+  { print }'
+
+  echo "===disk_size==="
+  df -k | nawk '$1 ~ /^\/dev\// {s+=$2} END {print int(s/1024/1024)}'
+  
+  echo "===uptime==="
+  uptime
+
+  echo "===cpu==="
+  mpstat 1 2 | tail -1 | awk '{print 100 - $NF}'
+
+  echo "===cpu_cores==="
+  result=`kstat -p cpu_info 2>/dev/null | nawk -F'[: \t]+' '
+  $4=="chip_id" {chip[$2]=$5}
+  $4=="core_id" {core[$2]=$5}
+  $4=="ncore_per_chip" {ncore[$2]=$5}
+  END {
+    for (i in chip) {
+      sockets[chip[i]]=1
+      if (i in ncore && ncore[i] > 0) ncore_by_chip[chip[i]]=ncore[i]
+      if (i in core) core_set[chip[i] "," core[i]]=1
+    }
+
+    for (s in sockets) cpu++
+
+    for (s in ncore_by_chip) {
+      sum += ncore_by_chip[s]
+      ncore_chips++
+    }
+
+    if (ncore_chips > 0) {
+      cores_per_cpu = sum / ncore_chips
+    } else {
+      for (c in core_set) total_cores++
+      if (cpu > 0) cores_per_cpu = total_cores / cpu
+    }
+
+    if (cpu > 0 && cores_per_cpu > 0)
+      printf "CPU: %d, Cores/CPU: %.0f\n", cpu, cores_per_cpu
+  }'`
+
+  if [ -n "$result" ]; then
+    echo "$result"
+  else
+    psrinfo -pv | nawk '
+    /physical processor has/ {
+      cpu++
+      if ($6 == "cores" || $6 == "core") cores += $5
+      else if ($6 == "virtual" && ($7 == "processor" || $7 == "processors")) cores += $5
+    }
+    END {
+      if (cpu > 0 && cores > 0)
+        printf "CPU: %d, Cores/CPU: %.0f\n", cpu, cores / cpu
+    }'
+  fi
+
+  echo "===memory==="
+  vmstat 1 2 | tail -1 | awk '{print ($5/($4+$5))*100}'
+
+  echo "===memory_size==="
+  prtconf | awk '/Memory size/ {printf "%.0f\n", $3 * 1048576 / 1000000}'
+
+  echo "===user_list==="
+  awk -F: '$7 ~ /(sh|bash|ksh|pfksh)$/ {print $1}' /etc/passwd
+
+  echo "===service_list==="
+  if command -v svcs >/dev/null 2>&1; then
+    svcs -a | awk 'NR > 1 { print $3 }' | while read svc; do
+      state=`svcs -o state -H "$svc" 2>/dev/null`
+      enabled=`svcs -l "$svc" 2>/dev/null | awk '/^enabled/ {print $NF}'`
+      echo "{\"name\": \"$svc\", \"source\": \"smf\", \"state\": \"$state\", \"status\": \"$enabled\"}"
+    done
+  else
+    ls /etc/init.d | while read svc; do
+      echo "{\"name\": \"$svc\", \"source\": \"initd\", \"state\": \"unknown\"}"
+    done
+  fi
+
+  echo "===package_list==="
+  pkginfo | awk '{ print $2 }' | while read pkg; do 
+    info=`pkginfo -l $pkg`
+    version=`echo "$info" | grep 'VERSION' | cut -d':' -f2 | cut -d',' -f1 | sed 's/^ *//'`
+    release=`echo "$info" | grep 'VERSION' | cut -d',' -f2 | cut -d'=' -f2`
+    arch=`echo "$info" | grep 'ARCH' | cut -d':' -f2 | sed 's/^ *//'`
+    echo "{\"name\": \"$pkg\", \"version\": \"$version\", \"release\": \"$release\", \"epoch\": null, \"arch\": \"$arch\", \"source\": \"pkginfo\"}"
+  done
