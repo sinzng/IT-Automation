@@ -1,0 +1,630 @@
+# -*- coding: utf-8 -*-
+import argparse
+import json
+import re
+import sys
+import os
+from copy import copy
+from datetime import datetime
+from pathlib import Path
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.cell import range_boundaries
+
+
+OUTPUT_FILE = "password_change_report.xlsx"
+
+SUMMARY_RANGE = "B2:H4"
+META_LABEL_COL = 11
+META_VALUE_START_COL = 12
+META_VALUE_END_COL = 14
+TABLE_START_COL = 2
+TABLE_END_COL = 9
+TABLE_GROUP_ROW = 7
+TABLE_HEADER_START_ROW = 8
+TABLE_HEADER_END_ROW = 9
+DATA_START_ROW = 10
+
+ANSIBLE_FIELD_MAP = {
+    "system_name": ("inventory", "system_name"),
+    "purpose": ("host_name", "purpose", "hostname"),
+    "os": ("group", "os", "os_name"),
+    "ip": ("host", "ip"),
+    "before_account": ("before_user", "before_account", "account", "user"),
+    "after_account": ("after_user", "after_account", "system"),
+    "before_password": ("before_pass", "before_password"),
+    "after_password": ("system_pw", "after_pass", "after_password"),
+    "change_date": ("change_date", "date", "changed_at", "report_date"),
+    "result": ("result", "stdout"),
+    "result_message": ("result_message",),
+    "is_success": ("is_success",),
+}
+
+TRUE_VALUES = {"1", "true", "yes", "y", "ok", "success", "succeeded", "성공"}
+PASSWORD_YEAR_MONTH_PATTERN = re.compile(
+    r"(?<!\d)(\d{4}(?:0[1-9]|1[0-2])|\d{2}(?:0[1-9]|1[0-2]))(?!\d)"
+)
+PASSWORD_MASK_CHAR = "*"
+
+
+def safe_text(value, default=""):
+    if value is None:
+        return default
+    value = str(value).strip()
+    if value.lower() in ("", "none", "null"):
+        return default
+    return value
+
+
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+
+    text = safe_text(value).lower()
+    if text in ("true", "1", "yes", "y", "on"):
+        return True
+    if text in ("false", "0", "no", "n", "off"):
+        return False
+
+    raise argparse.ArgumentTypeError("true 또는 false를 입력하세요.")
+
+
+def first_text(*values, **kwargs):
+    default = kwargs.get("default", "")
+    for value in values:
+        text = safe_text(value)
+        if text:
+            return text
+    return default
+
+
+def mapped_first_text(source, field_name, default=""):
+    return first_text(
+        *(source.get(key) for key in ANSIBLE_FIELD_MAP[field_name]),
+        default=default,
+    )
+
+
+def bool_value(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in TRUE_VALUES
+
+
+def extract_result_flag(value, is_success=False):
+    text = safe_text(value)
+
+    if "패스워드 변경이 완료되었습니다." in text:
+        return "패스워드 변경이 완료되었습니다."
+    if "패스워드 변경 실패" in text:
+        return "패스워드 변경 실패"
+    if "패스워드 변경 확인이 필요합니다." in text:
+        return "패스워드 변경 확인이 필요합니다."
+
+    if is_success:
+        return "패스워드 변경이 완료되었습니다."
+    return "패스워드 변경 확인이 필요합니다."
+
+
+def read_content_value(input_path):
+    if not input_path:
+        raise ValueError("--input으로 Ansible에서 생성한 content_value JSON 경로를 전달해야 합니다.")
+
+    if input_path == "-":
+        raw_text = sys.stdin.read()
+    else:
+        raw_text = Path(input_path).read_text(encoding="utf-8")
+
+    content = json.loads(raw_text)
+    if isinstance(content, dict):
+        for wrapper_key in ("content_value", "content"):
+            if wrapper_key in content:
+                return content[wrapper_key]
+    return content
+
+
+def extract_data_list(content_value):
+    if isinstance(content_value, list):
+        return content_value
+    if isinstance(content_value, dict):
+        data_list = content_value.get("data_list", [])
+        return data_list if isinstance(data_list, list) else []
+    return []
+
+
+def normalize_account(account):
+    before_account = mapped_first_text(account, "before_account", default="none")
+    after_account = first_text(
+        mapped_first_text(account, "after_account"),
+        before_account,
+        default=before_account,
+    )
+    before_password = mapped_first_text(account, "before_password")
+    after_password = mapped_first_text(account, "after_password")
+
+    return {
+        "account": before_account,
+        "after_account": after_account,
+        "before_password": before_password,
+        "after_password": after_password,
+    }
+
+
+def convert_ansible_data(content_value):
+    data_list = extract_data_list(content_value)
+    if not data_list:
+        return []
+
+    converted_by_host = {}
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    for item in data_list:
+        host = mapped_first_text(item, "ip", default="none")
+        purpose = mapped_first_text(item, "purpose", default=host)
+        os_name = mapped_first_text(item, "os")
+        is_ansible_item = any(
+            key_name in item
+            for key_name in (
+                "inventory",
+                "before_user",
+                "before_pass",
+                "system_pw",
+                "host_name",
+            )
+        )
+        system_name = first_text(
+            mapped_first_text(item, "system_name"),
+            "" if is_ansible_item else item.get("system"),
+            default="none",
+        )
+        key = "{0}|{1}|{2}".format(host, purpose, os_name)
+
+        if key not in converted_by_host:
+            converted_by_host[key] = {
+                "system": system_name,
+                "purpose": purpose,
+                "os": os_name,
+                "ip": host,
+                "accounts": [],
+                "change_date": mapped_first_text(item, "change_date", default=today),
+                "remark": "",
+                "result": "",
+            }
+
+        accounts = item.get("accounts")
+        if isinstance(accounts, list) and accounts:
+            for account in accounts:
+                converted_by_host[key]["accounts"].append(normalize_account(account))
+        else:
+            converted_by_host[key]["accounts"].append(normalize_account(item))
+
+        raw_result_text = first_text(
+            mapped_first_text(item, "result_message"),
+            mapped_first_text(item, "result"),
+        )
+        success_value = next(
+            (item.get(key) for key in ANSIBLE_FIELD_MAP["is_success"] if key in item),
+            False,
+        )
+        result_flag = extract_result_flag(raw_result_text, bool_value(success_value))
+        converted_by_host[key]["remark"] = result_flag
+        converted_by_host[key]["result"] = result_flag
+
+    return list(converted_by_host.values())
+
+
+def create_styles():
+    thin = Side(style="thin", color="000000")
+    medium = Side(style="medium", color="000000")
+
+    return {
+        "title_font": Font(name="Malgun Gothic", size=17, bold=True, color="000000"),
+        "body_font": Font(name="Malgun Gothic", size=10, color="000000"),
+        "header_font": Font(name="Malgun Gothic", size=10, bold=True, color="FFFFFF"),
+        "sub_header_font": Font(name="Malgun Gothic", size=10, bold=True, color="000000"),
+        "meta_font": Font(name="Malgun Gothic", size=10, bold=True, color="FFFFFF"),
+        "title_fill": PatternFill("solid", fgColor="FFFFFF"),
+        "header_fill": PatternFill("solid", fgColor="3F3F46"),
+        "sub_header_fill": PatternFill("solid", fgColor="D9D9D9"),
+        "meta_fill": PatternFill("solid", fgColor="595959"),
+        "white_fill": PatternFill("solid", fgColor="FFFFFF"),
+        "data_fill": PatternFill(fill_type=None),
+        "thin_border": Border(left=thin, right=thin, top=thin, bottom=thin),
+        "medium_side": medium,
+        "center": Alignment(horizontal="center", vertical="center", wrap_text=True),
+        "data_center": Alignment(horizontal="center", vertical="center", wrap_text=False),
+        "right": Alignment(horizontal="right", vertical="center", wrap_text=True, indent=1),
+    }
+
+
+def mask_password(password, enabled=True):
+    password = safe_text(password)
+    if not password:
+        return ""
+
+    if not enabled:
+        return password
+
+    masked = [PASSWORD_MASK_CHAR] * len(password)
+    match = PASSWORD_YEAR_MONTH_PATTERN.search(password)
+    if match:
+        for idx, char in enumerate(match.group(1), start=match.start()):
+            masked[idx] = char
+    return "".join(masked)
+
+
+def format_account_password(account, password, mask_passwords=True):
+    account = safe_text(account)
+    password = mask_password(password, enabled=mask_passwords)
+    if account and password:
+        return "{0} / {1}".format(account, password)
+    return account or password
+
+
+def get_account_lines(item, mask_passwords=True):
+    accounts = item.get("accounts")
+    if not accounts:
+        return {
+            "before_pass": format_account_password(
+                item.get("before_account", ""),
+                item.get("before_password", ""),
+                mask_passwords=mask_passwords,
+            ),
+            "after_pass": format_account_password(
+                item.get("after_account", item.get("before_account", "")),
+                item.get("after_password", ""),
+                mask_passwords=mask_passwords,
+            ),
+        }
+
+    before_passes = []
+    after_passes = []
+
+    for account in accounts:
+        account_name = account.get("account", "")
+        before_passes.append(
+            format_account_password(
+                account_name,
+                account.get("before_password", ""),
+                mask_passwords=mask_passwords,
+            )
+        )
+        after_passes.append(
+            format_account_password(
+                account.get("after_account", account_name),
+                account.get("after_password", ""),
+                mask_passwords=mask_passwords,
+            )
+        )
+
+    return {
+        "before_pass": " / ".join(before_passes),
+        "after_pass": " / ".join(after_passes),
+    }
+
+
+def style_range(ws, cell_range, fill=None, font=None, border=None, alignment=None):
+    for row in ws[cell_range]:
+        for cell in row:
+            if fill is not None:
+                cell.fill = fill
+            if font is not None:
+                cell.font = font
+            if border is not None:
+                cell.border = border
+            if alignment is not None:
+                cell.alignment = alignment
+
+
+def set_outline_border(ws, cell_range, side):
+    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+
+    for row in ws.iter_rows(
+        min_row=min_row,
+        max_row=max_row,
+        min_col=min_col,
+        max_col=max_col,
+    ):
+        for cell in row:
+            border = copy(cell.border)
+            cell.border = Border(
+                left=side if cell.column == min_col else border.left,
+                right=side if cell.column == max_col else border.right,
+                top=side if cell.row == min_row else border.top,
+                bottom=side if cell.row == max_row else border.bottom,
+            )
+
+
+def merge_cell(ws, cell_range, value, styles, fill_key, font_key, alignment_key="center"):
+    ws.merge_cells(cell_range)
+    top_left = ws[cell_range.split(":")[0]]
+    top_left.value = value
+    style_range(
+        ws,
+        cell_range,
+        fill=styles[fill_key],
+        font=styles[font_key],
+        border=styles["thin_border"],
+        alignment=styles[alignment_key],
+    )
+
+
+def write_summary(ws, styles):
+    merge_cell(
+        ws,
+        SUMMARY_RANGE,
+        "■ 서버별 계정/PASS 변경 내역 :",
+        styles,
+        fill_key="title_fill",
+        font_key="title_font",
+        alignment_key="center",
+    )
+    ws[SUMMARY_RANGE.split(":")[0]].alignment = styles["center"]
+
+
+def create_header(ws, styles):
+    write_summary(ws, styles)
+
+    report_date = datetime.now().strftime("%Y-%m-%d")
+    meta_rows = [
+        ("기관명", ""),
+        ("확인자", ""),
+        ("작성자", ""),
+        ("일자", report_date),
+    ]
+
+    for row_idx, (label, value) in enumerate(meta_rows, start=2):
+        ws.cell(row=row_idx, column=META_LABEL_COL, value=label)
+        ws.merge_cells(
+            start_row=row_idx,
+            start_column=META_VALUE_START_COL,
+            end_row=row_idx,
+            end_column=META_VALUE_END_COL,
+        )
+        ws.cell(row=row_idx, column=META_VALUE_START_COL, value=value)
+
+    style_range(
+        ws,
+        "I2:I5",
+        fill=styles["meta_fill"],
+        font=styles["meta_font"],
+        border=styles["thin_border"],
+        alignment=styles["center"],
+    )
+    style_range(
+        ws,
+        "L2:N5",
+        fill=styles["white_fill"],
+        font=styles["body_font"],
+        border=styles["thin_border"],
+        alignment=styles["right"],
+    )
+    set_outline_border(ws, "K2:N5", styles["medium_side"])
+
+    merge_cell(ws, "B7:E7", "시스템 정보", styles, fill_key="header_fill", font_key="header_font")
+    merge_cell(ws, "F7:G7", "PASS 정보", styles, fill_key="header_fill", font_key="header_font")
+    merge_cell(ws, "H7:H7", "변경 정보", styles, fill_key="header_fill", font_key="header_font")
+    merge_cell(ws, "I7:I7", "결과 정보", styles, fill_key="header_fill", font_key="header_font")
+
+    headers = [
+        ("B8:B9", "시스템"),
+        ("C8:C9", "용도"),
+        ("D8:D9", "OS"),
+        ("E8:E9", "IP"),
+        ("F8:F9", "이전 PASS\n(계정명 / PW)"),
+        ("G8:G9", "변경 PASS\n(계정명 / PW)"),
+        ("H8:H9", "변경일자"),
+        ("I8:I9", "결과"),
+    ]
+
+    for cell_range, value in headers:
+        merge_cell(
+            ws,
+            cell_range,
+            value,
+            styles,
+            fill_key="sub_header_fill",
+            font_key="sub_header_font",
+        )
+
+    set_outline_border(ws, "B7:E9", styles["medium_side"])
+    set_outline_border(ws, "F7:G9", styles["medium_side"])
+    set_outline_border(ws, "H7:H9", styles["medium_side"])
+    set_outline_border(ws, "I7:I9", styles["medium_side"])
+
+
+def write_data(ws, data, styles, start_row=DATA_START_ROW, mask_passwords=True):
+    columns = [
+        "system",
+        "purpose",
+        "os",
+        "ip",
+        "before_pass",
+        "after_pass",
+        "change_date",
+        "result",
+    ]
+
+    table_start_letter = get_column_letter(TABLE_START_COL)
+    table_end_letter = get_column_letter(TABLE_END_COL)
+
+    for row_offset, item in enumerate(data):
+        row_idx = start_row + row_offset
+        account_lines = get_account_lines(item, mask_passwords=mask_passwords)
+        row_values = {
+            "system": item.get("system", ""),
+            "purpose": item.get("purpose", ""),
+            "os": item.get("os", ""),
+            "ip": item.get("ip", ""),
+            "before_pass": account_lines["before_pass"],
+            "after_pass": account_lines["after_pass"],
+            "change_date": item.get("change_date", ""),
+            "result": item.get("result", ""),
+        }
+
+        for col_offset, key in enumerate(columns):
+            ws.cell(
+                row=row_idx,
+                column=TABLE_START_COL + col_offset,
+                value=row_values.get(key, ""),
+            )
+
+        style_range(
+            ws,
+            "{0}{1}:{2}{1}".format(table_start_letter, row_idx, table_end_letter),
+            fill=styles["data_fill"],
+            font=styles["body_font"],
+            border=styles["thin_border"],
+            alignment=styles["data_center"],
+        )
+
+    last_row = start_row + len(data) - 1
+    if data:
+        set_outline_border(
+            ws,
+            "{0}{1}:{2}{3}".format(
+                table_start_letter,
+                TABLE_GROUP_ROW,
+                table_end_letter,
+                last_row,
+            ),
+            styles["medium_side"],
+        )
+
+    return last_row
+
+
+def auto_fit_table_columns(ws, start_col, end_col, start_row, end_row, max_width=32):
+    for col_idx in range(start_col, end_col + 1):
+        col_letter = get_column_letter(col_idx)
+        current_width = ws.column_dimensions[col_letter].width or 8.43
+        max_length = 0
+
+        for row_idx in range(start_row, end_row + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value is None:
+                continue
+            max_length = max(max_length, len(str(value)))
+
+        if max_length:
+            ws.column_dimensions[col_letter].width = max(
+                current_width,
+                min(max_length + 4, max_width),
+            )
+
+
+def save_report(filename=OUTPUT_FILE, report_data=None, mask_passwords=True):
+    filename = Path(filename)
+
+    if filename.suffix == "":
+        filename = filename / OUTPUT_FILE
+
+    filename.parent.mkdir(parents=True, exist_ok=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PASS 변경내역"
+    ws.sheet_view.showGridLines = True
+
+    styles = create_styles()
+    if report_data is None:
+        report_data = []
+
+    create_header(ws, styles)
+    last_row = write_data(ws, report_data, styles, mask_passwords=mask_passwords)
+
+    column_widths = {
+        "A": 4,
+        "B": 11,
+        "C": 20,
+        "D": 16,
+        "E": 15,
+        "F": 24,
+        "G": 24,
+        "H": 14,
+        "I": 28,
+        "J": 4,
+        "K": 10,
+        "L": 10,
+        "M": 10,
+        "N": 10,
+    }
+
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+
+    auto_fit_table_columns(
+        ws,
+        TABLE_START_COL,
+        TABLE_END_COL,
+        TABLE_HEADER_START_ROW,
+        max(last_row, TABLE_HEADER_END_ROW),
+    )
+
+    for col_idx in range(1, 15):
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].bestFit = True
+
+    ws.freeze_panes = None
+    ws.print_title_rows = "1:9"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.25
+    ws.page_margins.top = 0.5
+    ws.page_margins.bottom = 0.5
+    ws.print_options.horizontalCentered = True
+
+    if last_row < DATA_START_ROW:
+        last_row = DATA_START_ROW
+
+    wb.save(str(filename))
+    print("exists:", filename.exists())
+    print("size:", filename.stat().st_size)
+    print("listdir:", os.listdir(filename.parent))
+    return str(filename)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Ansible content_value JSON 데이터로 PASS 변경 내역 보고서를 생성합니다."
+    )
+    parser.add_argument(
+        "-i",
+        "--input",
+        required=True,
+        help="Ansible content_value JSON 파일 경로입니다. '-'를 지정하면 stdin에서 읽습니다.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=OUTPUT_FILE,
+        help="생성할 엑셀 파일 경로입니다. 기본값: {0}".format(OUTPUT_FILE),
+    )
+    parser.add_argument(
+        "--mask-passwords",
+        type=parse_bool,
+        default=False,
+        help="패스워드 마스킹 여부입니다. true/false. 기본값: false",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    content_value = read_content_value(args.input)
+    ansible_data = convert_ansible_data(content_value)
+    if not ansible_data:
+        raise SystemExit("보고서 생성 데이터가 없습니다. Ansible content_value.data_list를 확인하세요.")
+    saved_file = save_report(
+        args.output,
+        ansible_data,
+        mask_passwords=args.mask_passwords,
+    )
+    print("saved: {0}".format(saved_file))

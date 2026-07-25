@@ -1,0 +1,21 @@
+---
+- name: 디버그테스트
+  hosts: all
+  gather_facts: no
+  tasks:
+    - debug:
+        msg: |
+          ansible_user: '{{ ansible_user }}'
+          ansible_password: '{{ ansible_password }}'
+          ansible_become: '{{ ansible_become }}'
+          ansible_become_method: '{{ ansible_become_method }}'
+          ansible_become_user: '{{ ansible_become_user }}'
+          ansible_become_password: '{{ ansible_become_password }}'
+          fap: '{{ fap }}'
+
+    - raw: hostname
+      become: yes
+      register: host
+    
+    - debug:
+        var: host.stdout

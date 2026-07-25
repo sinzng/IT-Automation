@@ -1,0 +1,45 @@
+{
+    "data_list": [
+        {
+            "before_pass": "!Xdls083wmd",
+            "before_user": "sysmng",
+            "change_date": "",
+            "change_time": "12:22:24",
+            "changed_by": "\uc2e0\uc9c0\ud604",
+            "command": "passwd",
+            "group": "test",
+            "host": "192.168.1.83",
+            "host_name": "omji",
+            "inventory": "SERVER",
+            "is_pass": "none",
+            "is_success": true,
+            "name": "\ud328\uc2a4\uc6cc\ub4dc \ubcc0\uacbd \uacb0\uacfc",
+            "report_type": "changepwd",
+            "result": "\ud328\uc2a4\uc6cc\ub4dc \ubcc0\uacbd\uc774 \uc644\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.",
+            "result_message": "\ud328\uc2a4\uc6cc\ub4dc \ubcc0\uacbd\uc774 \uc644\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.",
+            "system": "sysmng",
+            "system_pw": "!Xdls083wmd"
+        },
+        {
+            "before_pass": "!Xdls040wmd",
+            "before_user": "sysmng",
+            "change_date": "",
+            "change_time": "12:22:24",
+            "changed_by": "\uc2e0\uc9c0\ud604",
+            "command": "passwd",
+            "group": "test",
+            "host": "192.168.1.40",
+            "host_name": "sjhrhel9.7",
+            "inventory": "SERVER",
+            "is_pass": "none",
+            "is_success": false,
+            "name": "\ud328\uc2a4\uc6cc\ub4dc \ubcc0\uacbd \uacb0\uacfc",
+            "report_type": "changepwd",
+            "result": "\ud328\uc2a4\uc6cc\ub4dc \ubcc0\uacbd \ud655\uc778\uc774 \ud544\uc694\ud569\ub2c8\ub2e4.",
+            "result_message": "\ud328\uc2a4\uc6cc\ub4dc \ubcc0\uacbd \ud655\uc778\uc774 \ud544\uc694\ud569\ub2c8\ub2e4.",
+            "system": "sysmng",
+            "system_pw": "!Xdls040wmd"
+        }
+    ],
+    "total_count": "2"
+}
