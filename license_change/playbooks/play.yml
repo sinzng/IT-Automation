@@ -1,0 +1,63 @@
+---
+- name: license_change
+  hosts: all
+  gather_facts: false
+  strategy: free
+  ignore_errors: false
+  ignore_unreachable: true
+
+  vars_files: 
+    - ../vars/license_JEUS_vars.yml
+
+  # pre_tasks: 
+  #   - name: 공통 사전 준비 작업
+  #     include_tasks: ../../faplib/tasks/pre_check.yml
+
+  tasks:
+    - name : ansible_os_family
+      raw: uname -s
+      register: ansible_os_family
+      when: "ansible_port != 5985"
+
+    - name : windows_os_family
+      win_shell: Get-WmiObject Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture
+      register: windows_os_family
+      when: "ansible_port == 5985"
+    
+    - name: Set system os name
+      set_fact:
+        system_os: "{{ 'Windows' if ansible_port == 5985 else 'Linux' }}"
+
+    - name: Linux server
+      include_tasks: ../tasks/license_JEUS_tasks.yml
+      when: ansible_os_family | regex_search('(?i)Linux')
+
+    - name: Windows Server
+      include_tasks: ../tasks/license_JEUS_tasks_win.yml
+      when: windows_os_family | regex_search('(?i)Windows')
+
+- name: 라이선스 엑셀 보고서 생성
+  hosts: all
+  run_once: true
+  gather_facts: false
+  ignore_errors: false
+  ignore_unreachable: true
+  vars_files: 
+    - ../vars/license_JEUS_vars.yml
+  tasks:
+  - name: make excel report
+    command: /usr/bin/python3 ../vars/make_ex_report.py
+    environment:
+      system_os: "{{ system_os }}"
+      host_ip: "{{ fap.host_ip }}"
+      device_name: "{{ fap.host_name }}"
+      port: "{{ ansible_port }}"
+      json_path: "{{ json_path }}"
+      output_path: "{{ save_path }}"
+      file_name: "{{ ex_file_name }}"
+    run_once: true
+    delegate_to: localhost
+
+  - name: DB 저장 작업 호출
+    include_tasks: ../tasks/save_db.yml
+  

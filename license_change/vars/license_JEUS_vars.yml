@@ -1,0 +1,38 @@
+---
+# 로컬 파일 - 스크립트 파일
+script_name: "hostname.sh"
+script_path: "../vars/hostname_was.sh"
+
+# 로컬 파일 - 라이선스 파일
+jeus_zip_path: "../vars/JEUS_LICENSE_INPUT/JEUS_DEMO.zip"
+webtob_zip_path: "../vars/WEBTOB_LICENSE_INPUT/WEBTOB_DEMO.zip"
+
+# 대상 경로
+output_path: "/home/sysmng/license/"
+output_path_win: "C:\\TmaxSoft\\JEUS6.0\\license"
+temp_path_win: "C:\\temp"
+#save_path: "/fap/report/{{ today }}/{{ inventory_hostname }}"
+
+# 저장 경로
+json_path: "/fap/report/{{ report_name }}/{{ today }}/{{ fap.job_id }}/json"
+save_path: "/fap/report/{{ report_name }}/{{ today }}/{{ fap.job_id }}/license_excel"
+report_name: "license"
+report_type: "custom_report_excel"
+file_name: "{{ hostname_check.stdout_lines[1] }}_{{ today }}.log"
+ex_file_name: "license_report_jeus_{{ today }}.xlsx"
+
+# 테스트 데이터 - 실제 작업 시 삭제
+web_check: |
+  =================== JEUS LICENSE INFORMATION ===================
+  === EDITION : Enterprise (Demo License)
+  === DUE-DAY : 2024/12/19
+  === CPU : unlimited
+  === HOST-NAME : cclwas023
+  ================================================================
+  =================== JEUS LICENSE INFORMATION ===================
+  === EDITION : Enterprise (Demo License)
+  === DUE-DAY : 2025/2/20
+  === CPU : unlimited
+  === HOST-NAME : cclwas023
+  ================================================================
+  rm: cannot remove `/home/sysmng/license': 디렉터리입니다

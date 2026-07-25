@@ -1,0 +1,21 @@
+---
+- name: 일시 생성
+  set_fact:
+    today: "{{ lookup('ansible.builtin.pipe', 'date +%y%m%d') }}"
+  delegate_to: localhost
+
+- name: hostname 수집
+  raw: hostname
+  register: hostname_check
+
+- name: Check hostname result
+  debug:
+    msg: "{{ hostname_check }}"
+
+- name: jeus_sh 파일 실행
+  raw: cd /home/sysmng/license/ && ./venti_jeus3.sh
+  register: web_check
+
+- name: Check jeus result
+  debug:
+    msg: "{{ web_check }}"

@@ -1,0 +1,55 @@
+---
+- name: 일시 생성
+  set_fact:
+    today: "{{ lookup('ansible.builtin.pipe', 'date +%y%m%d') }}"
+  delegate_to: localhost
+
+- name: hostname 수집
+  raw: hostname
+  register: hostname_check
+
+- name: 파일 배포
+  command: /usr/bin/python3 ../vars/scp.py
+  environment:
+    script_path: "{{ script_path }}"
+    output_path: "{{ output_path }}"
+    sh_path: "{{ sh_path }}"
+    jeus_zip_path: "{{ jeus_zip_path }}"
+    webtob_zip_path: "{{ webtob_zip_path }}"
+    host_ip: "{{ fap.host_ip }}"
+    user: "{{ ansible_user }}"
+    password: "{{ ansible_password }}"
+    port: "{{ ansible_port }}"
+  register: python_scp
+  delegate_to: localhost
+
+- name: 파일 배포 debug
+  debug:
+    var: python_scp.stdout
+
+- name: 파일 확인 변수 생성
+  raw: "ls -al {{ output_path }}"
+  register: file_check
+
+- name: 파일 소유 추가
+  raw: "chown root.root /home/sysmng/license/hostname_was.sh"
+
+- name: 파일 실행 권한 추가   
+  raw: "chmod +x /home/sysmng/license/hostname_was.sh"
+
+- name: hostname_was 파일 실행
+  raw: cd /home/sysmng/license/ && ./hostname_was.sh
+  register: Linux_vulner_check
+
+
+- name: Check hostname_was result
+  debug:
+    msg: "{{ Linux_vulner_check }}"
+
+- name: jeus_sh 파일 실행
+  raw: cd /home/sysmng/license/ && ./jeus_license_update.sh
+  register: web_check
+
+- name: Check jeus result
+  debug:
+    msg: "{{ web_check }}"

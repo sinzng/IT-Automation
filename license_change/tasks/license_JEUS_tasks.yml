@@ -1,0 +1,73 @@
+---
+- name: 일시 생성
+  set_fact:
+    today: "{{ lookup('ansible.builtin.pipe', 'date +%Y%m%d') }}"
+  delegate_to: localhost
+
+- name: hostname 수집
+  raw: hostname
+  register: hostname_check
+
+# - name: 파일 배포
+#   command: /usr/bin/python3 ../vars/scp.py
+#   environment:
+#     script_path: "{{ script_path }}"
+#     output_path: "{{ output_path }}"
+#     jeus_zip_path: "{{ jeus_zip_path }}"
+#     host_ip: "{{ fap.host_ip }}"
+#     user: "{{ ansible_user }}"
+#     password: "{{ ansible_password }}"
+#     port: "{{ ansible_port }}"
+#   register: python_scp
+#   delegate_to: localhost
+
+# - name: 파일 배포 debug
+#   debug:
+#     var: python_scp.stdout
+
+# - name: 파일 확인 변수 생성
+#   raw: "ls -al {{ output_path }}"
+#   register: file_check
+
+# - name: 파일 소유 추가
+#   raw: "chown root.root /home/sysmng/license/hostname_was.sh"
+
+# - name: 파일 실행 권한 추가   
+#   raw: "chmod +x /home/sysmng/license/hostname_was.sh"
+
+# - name: hostname_was 파일 실행
+#   raw: cd /home/sysmng/license/ && ./hostname_was.sh
+#   register: Linux_vulner_check
+
+# - name: Check hostname_was result
+#   debug:
+#     msg: "{{ Linux_vulner_check }}"
+
+# - name: jeus_sh 파일 실행
+#   raw: cd /home/sysmng/license/ && ./jeus_license_update.sh
+#   register: web_check
+
+# - name: Check jeus result
+#   debug:
+#     msg: "{{ web_check }}"
+
+# - name: jeus ID 추출
+#   raw: cat /home/sysmng/license/res.log
+#   register: jeus_id
+
+- name: make json
+  command: /usr/bin/python3 ../vars/make_json.py
+  environment:
+    # jeus_id: "{{ jeus_id.stdout | trim }}"
+    jeus_id: "jeus_id"
+    host_ip: "{{ fap.host_ip }}"
+    device_name: "{{ fap.host_name }}"
+    port: "{{ ansible_port }}"
+    web_check: "{{ web_check }}"
+    json_path: "{{ json_path }}"
+    output_path: "{{ save_path }}"
+    file_name: "{{ ex_file_name }}"
+  register: report_result
+  delegate_to: localhost
+
+
